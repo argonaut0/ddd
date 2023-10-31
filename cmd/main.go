@@ -13,7 +13,7 @@ import (
 	"github.com/cloudflare/cloudflare-go"
 )
 
-const PublicIPEchoEndpoint = "https://api.ipify.org"
+const PublicIPEchoEndpoint = "https://api.ipify.org./"
 
 func retrievePublicIp() (string, error) {
 
