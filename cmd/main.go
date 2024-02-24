@@ -22,7 +22,7 @@ func retrievePublicIp() (string, error) {
 		return "", err
 	}
 
-	ctx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(req.Context(), 10*time.Second)
 	defer cancel()
 
 	req = req.WithContext(ctx)
