@@ -40,11 +40,12 @@ func retrievePublicIp() (string, error) {
 	return string(ip), nil
 }
 
-func createOrUpdateIP(targetDomain, targetIP, zoneID string) error {
-	api, err := cloudflare.NewWithAPIToken(os.Getenv("CLOUDFLARE_API_TOKEN"))
-	if err != nil {
-		return fmt.Errorf("error initializing Cloudflare client: %s", err)
-	}
+type Daemon struct {
+	Api *cloudflare.API
+}
+
+func (d *Daemon) createOrUpdateIP(targetDomain, targetIP, zoneID string) error {
+	api := d.Api
 	ctx, cancelCtx := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelCtx()
 
@@ -92,8 +93,57 @@ func createOrUpdateIP(targetDomain, targetIP, zoneID string) error {
 	return nil
 }
 
+func (d *Daemon) retrieveRecord(targetDomain, zoneID string) (string, error) {
+	api := d.Api
+	ctx, cancelCtx := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelCtx()
+
+	listParams := cloudflare.ListDNSRecordsParams{
+		Type: "A",
+		Name: targetDomain,
+	}
+
+	// Fetch user details on the account
+	l, i, err := api.ListDNSRecords(ctx, cloudflare.ZoneIdentifier(zoneID), listParams)
+	if err != nil {
+		return "", fmt.Errorf("error retrieving existing DNS Records: %s", err)
+	}
+	if i.Count > 1 {
+		return "", fmt.Errorf("more than 1 record for %s exists", targetDomain)
+	}
+	return l[0].Content, nil
+}
+
 func main() {
+
+	targetDomain := os.Getenv("DNS_A_RECORD_FQDN")
+	zoneID := os.Getenv("CLOUDFLARE_SITE_ZONE_ID")
+	api, err := cloudflare.NewWithAPIToken(os.Getenv("CLOUDFLARE_API_TOKEN"))
+	if err != nil {
+		log.Printf("error initializing Cloudflare client: %s", err)
+		os.Exit(1)
+	}
+	d := Daemon{Api: api}
+	oldIP, err := d.retrieveRecord(targetDomain, zoneID)
+	if err != nil {
+		log.Printf("could not retrieve existing record: %s", err)
+	}
+	targetIP, err := retrievePublicIp()
+	if err != nil {
+		log.Printf("Could not retrieve public IPv4: %s", err)
+	}
+	log.Printf("Public IP is: %s", targetIP)
+	err = d.createOrUpdateIP(targetDomain, targetIP, zoneID)
+	if err != nil {
+		log.Println(err)
+	} else {
+		oldIP = targetIP
+	}
+
 	poll := os.Getenv("POLLING")
+	if poll != "true" {
+		os.Exit(0)
+	}
 	pollVar, intervalSpecified := os.LookupEnv("POLL_INTERVAL_SECONDS")
 	var pollInterval = 120
 	if intervalSpecified {
@@ -104,43 +154,23 @@ func main() {
 		}
 	}
 
-	targetDomain := os.Getenv("DNS_A_RECORD_FQDN")
-	targetIP, err := retrievePublicIp()
-	zoneID := os.Getenv("CLOUDFLARE_SITE_ZONE_ID")
-	if err != nil {
-		log.Printf("Could not retrieve public IPv4: %s", err)
-		if poll != "true" {
-			os.Exit(1)
+	for {
+		time.Sleep(time.Duration(pollInterval) * time.Second)
+		newIP, err := retrievePublicIp()
+		if err != nil {
+			log.Printf("Could not retrieve public IPv4: %s", err)
+			continue
 		}
-	} else {
-		log.Printf("Public IP is: %s", targetIP)
-		err = createOrUpdateIP(targetDomain, targetIP, zoneID)
+		if newIP == oldIP {
+			log.Println("Retrieved new IP, no change detected")
+			continue
+		}
+		log.Printf("IP changed from %s to %s, updating...", targetIP, newIP)
+		err = d.createOrUpdateIP(targetDomain, targetIP, zoneID)
 		if err != nil {
 			log.Println(err)
-			if poll != "true" {
-				os.Exit(1)
-			}
+			continue
 		}
-	}
-
-	if poll == "true" {
-		for {
-			time.Sleep(time.Duration(pollInterval) * time.Second)
-			newIP, err := retrievePublicIp()
-			if err != nil {
-				log.Printf("Could not retrieve public IPv4: %s", err)
-			} else {
-				if newIP != targetIP {
-					log.Printf("IP changed from %s to %s, updating...", targetIP, newIP)
-					targetIP = newIP
-					err = createOrUpdateIP(targetDomain, targetIP, zoneID)
-					if err != nil {
-						log.Println(err)
-					}
-				} else {
-					log.Println("Retrieved new IP, no change detected")
-				}
-			}
-		}
+		oldIP = newIP
 	}
 }
