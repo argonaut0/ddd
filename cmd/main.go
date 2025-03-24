@@ -13,7 +13,7 @@ import (
 	"github.com/cloudflare/cloudflare-go"
 )
 
-const PublicIPEchoEndpoint = "https://api.ipify.org./"
+const PublicIPEchoEndpoint = "https://api6.ipify.org./"
 
 func retrievePublicIp() (string, error) {
 
@@ -50,7 +50,7 @@ func (d *Daemon) createOrUpdateIP(targetDomain, targetIP, zoneID string) error {
 	defer cancelCtx()
 
 	listParams := cloudflare.ListDNSRecordsParams{
-		Type: "A",
+		Type: "AAAA",
 		Name: targetDomain,
 	}
 
@@ -64,7 +64,7 @@ func (d *Daemon) createOrUpdateIP(targetDomain, targetIP, zoneID string) error {
 	}
 	if i.Count == 0 {
 		recordCreate := cloudflare.CreateDNSRecordParams{
-			Type:    "A",
+			Type:    "AAAA",
 			Name:    targetDomain,
 			Content: targetIP,
 			Comment: "Updated by Dynamic DNS Daemon https://github.com/argonaut0/ddd",
@@ -77,7 +77,7 @@ func (d *Daemon) createOrUpdateIP(targetDomain, targetIP, zoneID string) error {
 		fmt.Println("Successfully created new DNS record")
 	} else {
 		recordUpdate := cloudflare.UpdateDNSRecordParams{
-			Type:    "A",
+			Type:    "AAAA",
 			Name:    targetDomain,
 			Content: targetIP,
 			Comment: "Updated by Dynamic DNS Daemon https://github.com/argonaut0/ddd",
@@ -99,7 +99,7 @@ func (d *Daemon) retrieveRecord(targetDomain, zoneID string) (string, error) {
 	defer cancelCtx()
 
 	listParams := cloudflare.ListDNSRecordsParams{
-		Type: "A",
+		Type: "AAAA",
 		Name: targetDomain,
 	}
 
