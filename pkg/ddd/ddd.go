@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"reflect"
 	"strings"
 	"time"
@@ -83,7 +84,7 @@ func (dm *Daemon) CheckIP(force bool) {
 	ctx := context.Background()
 
 	slog.Info("checking current address")
-	var candidateIPs []net.IP
+	var candidateIPs []netip.Addr
 	var err error
 	switch dm.AddressSource {
 	case SOURCE_INTERFACE:
@@ -107,7 +108,7 @@ func (dm *Daemon) CheckIP(force bool) {
 		if force {
 			slog.Info("ignoring whether address has changed, forcing update")
 		} else {
-			if ip.To4() != nil {
+			if ip.Is4() {
 				if ip.String() == dm.CurrentA {
 					slog.Info("no change in IPv4 address, skipping update", "ip", ip.String())
 					continue
@@ -124,7 +125,7 @@ func (dm *Daemon) CheckIP(force bool) {
 			slog.Error("failed to update record", "err", err)
 			continue
 		}
-		if ip.To4() != nil {
+		if ip.Is4() {
 			dm.CurrentA = ip.String()
 		} else {
 			dm.CurrentAAAA = ip.String()
@@ -132,7 +133,7 @@ func (dm *Daemon) CheckIP(force bool) {
 		slog.Info("record updated")
 	}
 }
-func (dm *Daemon) GetIPsByInterface() ([]net.IP, error) {
+func (dm *Daemon) GetIPsByInterface() ([]netip.Addr, error) {
 	iface, err := net.InterfaceByName(dm.InterfaceName)
 	if err != nil {
 		slog.Error("failed to get interface", "iface", dm.InterfaceName, "err", err)
@@ -145,16 +146,18 @@ func (dm *Daemon) GetIPsByInterface() ([]net.IP, error) {
 		return nil, err
 	}
 
-	candidateIPs := []net.IP{}
+	candidateIPs := []netip.Addr{}
 	for _, addr := range addrs {
-		ip, _, err := net.ParseCIDR(addr.String())
+		pfix, err := netip.ParsePrefix(addr.String())
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("could not parse prefix %v : %w", addr.String(), err)
 		}
+		ip := pfix.Addr()
 		if !ip.IsGlobalUnicast() {
 			slog.Debug("ignoring non-GUA address", "ip", ip, "iface", dm.InterfaceName)
 			continue
 		}
+
 		if ip.IsPrivate() {
 			slog.Debug("ignoring private address", "ip", ip, "iface", dm.InterfaceName)
 			continue
@@ -163,11 +166,12 @@ func (dm *Daemon) GetIPsByInterface() ([]net.IP, error) {
 		slog.Info("found potential address", "ip", ip, "iface", dm.InterfaceName)
 		candidateIPs = append(candidateIPs, ip)
 	}
+
 	return candidateIPs, nil
 }
 
-func (dm *Daemon) GetIPsByWeb() ([]net.IP, error) {
-	candidateIPs := make([]net.IP, 0)
+func (dm *Daemon) GetIPsByWeb() ([]netip.Addr, error) {
+	candidateIPs := make([]netip.Addr, 0)
 	urls := []string{dm.WebURL4, dm.WebURL6}
 	for _, url := range urls {
 		resp, err := http.Get(url)
@@ -185,10 +189,10 @@ func (dm *Daemon) GetIPsByWeb() ([]net.IP, error) {
 			slog.Error("failed to read response body", "api", url, "err", err)
 			continue
 		}
-		ip := net.ParseIP(strings.TrimSpace(string(response)))
+		ip, err := netip.ParseAddr(strings.TrimSpace(string(response)))
 
-		if ip == nil {
-			slog.Error("failed to parse IP from api response", "api", url, "response", string(response))
+		if err != nil {
+			slog.Error("failed to parse IP from api response", "api", url, "response", string(response), "err", err)
 			continue
 		}
 
@@ -198,37 +202,37 @@ func (dm *Daemon) GetIPsByWeb() ([]net.IP, error) {
 	return candidateIPs, nil
 }
 
-func (dm *Daemon) ChooseIPs(ips []net.IP) ([]net.IP, error) {
+func (dm *Daemon) ChooseIPs(ips []netip.Addr) ([]netip.Addr, error) {
 	if len(ips) == 0 {
 		return nil, fmt.Errorf("no addresses available")
 	}
-	var ipv4 net.IP
-	var ipv6 net.IP
-	picked := []net.IP{}
+	var v4Candidate netip.Addr
+	var v6Candidate netip.Addr
+	picked := []netip.Addr{}
 
 	if dm.AllowIPv4 {
 		for _, candidateIP := range ips {
-			if candidateIP.To4() != nil {
-				ipv4 = candidateIP
+			if candidateIP.Is4() {
+				v4Candidate = candidateIP
 				break
 			}
 		}
 	}
 	if dm.AllowIPv6 {
 		for _, candidateIP := range ips {
-			if candidateIP.To4() == nil {
-				ipv6 = candidateIP
+			if candidateIP.Is6() {
+				v6Candidate = candidateIP
 				break
 			}
 		}
 	}
-	if ipv4 != nil {
-		slog.Info("using IPv4 address", "ip", ipv4.String())
-		picked = append(picked, ipv4)
+	if v4Candidate.IsValid() {
+		slog.Info("using IPv4 address", "ip", v4Candidate.String())
+		picked = append(picked, v4Candidate)
 	}
-	if ipv6 != nil {
-		slog.Info("using IPv6 address", "ip", ipv6.String())
-		picked = append(picked, ipv6)
+	if v6Candidate.IsValid() {
+		slog.Info("using IPv6 address", "ip", v6Candidate.String())
+		picked = append(picked, v6Candidate)
 	}
 	if len(picked) < 1 {
 		return nil, fmt.Errorf("no enabled address available")
@@ -236,10 +240,10 @@ func (dm *Daemon) ChooseIPs(ips []net.IP) ([]net.IP, error) {
 	return picked, nil
 }
 
-func (dm *Daemon) UpdateDNS(ctx context.Context, ip net.IP) error {
+func (dm *Daemon) UpdateDNS(ctx context.Context, ip netip.Addr) error {
 
 	var recordType string
-	if ip.To4() != nil {
+	if ip.Is4() {
 		recordType = "A"
 	} else {
 		recordType = "AAAA"
@@ -252,13 +256,12 @@ func (dm *Daemon) UpdateDNS(ctx context.Context, ip net.IP) error {
 		"ip", ip.String(),
 		"type", recordType,
 		"ttl", dm.RecordTTL.Seconds())
-	// create records (AppendRecords is similar)
+
 	_, err := dm.RecordSetter.SetRecords(ctx, dm.Zone, []libdns.Record{
-		{
-			Type:  recordType,
-			Name:  dm.RecordName,
-			Value: ip.String(),
-			TTL:   dm.RecordTTL,
+		libdns.Address{
+			Name: dm.RecordName,
+			TTL:  dm.RecordTTL,
+			IP:   ip,
 		},
 	})
 
