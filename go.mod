@@ -5,11 +5,11 @@ go 1.24
 toolchain go1.24.1
 
 require (
-	github.com/libdns/alidns v1.0.3
+	github.com/libdns/alidns v1.0.4
 	github.com/libdns/autodns v0.0.0-20250217093418-afbefb5b548d
 	github.com/libdns/azure v0.4.0
 	github.com/libdns/bunny v1.3.2
-	github.com/libdns/cloudflare v0.1.3
+	github.com/libdns/cloudflare v0.2.0
 	github.com/libdns/cloudns v1.0.0
 	github.com/libdns/ddnss v0.1.0
 	github.com/libdns/desec v0.2.4
@@ -21,7 +21,7 @@ require (
 	github.com/libdns/dnspod v0.0.3
 	github.com/libdns/dnsupdate v0.0.0-20230728193621-2e79c50ea2ee
 	github.com/libdns/domainnameshop v0.1.1
-	github.com/libdns/libdns v0.2.3
+	github.com/libdns/libdns v1.0.0-beta.1
 )
 
 require (
