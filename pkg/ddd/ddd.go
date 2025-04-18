@@ -95,6 +95,7 @@ func (dm *Daemon) CheckIP(force bool) {
 		slog.Error("no address source specified")
 	}
 	if err != nil {
+		slog.Error("failed to get candidate IPs", "err", err)
 		return
 	}
 
@@ -172,12 +173,13 @@ func (dm *Daemon) GetIPsByInterface() ([]netip.Addr, error) {
 
 func (dm *Daemon) GetIPsByWeb() ([]netip.Addr, error) {
 	candidateIPs := make([]netip.Addr, 0)
+	// fixme: this breaks if only one of the APIs is available
 	urls := []string{dm.WebURL4, dm.WebURL6}
 	for _, url := range urls {
 		resp, err := http.Get(url)
 
 		if err != nil {
-			return candidateIPs, err
+			slog.Error("failed to make request to whoami", "api", url, "err", err)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
