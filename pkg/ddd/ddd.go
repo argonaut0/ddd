@@ -180,6 +180,7 @@ func (dm *Daemon) GetIPsByWeb() ([]netip.Addr, error) {
 
 		if err != nil {
 			slog.Error("failed to make request to whoami", "api", url, "err", err)
+			continue
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
